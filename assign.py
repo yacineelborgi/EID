@@ -9,6 +9,7 @@ import random
 from sortedcontainers import SortedList
 
 TYPES = "ntic"
+TOL_DIV = 100  # accepted waste (window/TOL_DIV) before trying the subset-sum DP
 
 
 class Pool:
@@ -109,7 +110,7 @@ def fill_bin(lb, ub, pools, K=300, G0=22000):
         # quick single-item close
         for p in pools:
             it = p.smallest_ge(g)
-            if it is not None and it[0] - g <= max(2, (hi - g) // 50) and it[0] <= hi:
+            if it is not None and it[0] - g <= max(2, (hi - g) // TOL_DIV) and it[0] <= hi:
                 res = [(p, it)]
                 break
         if res is None:
@@ -118,7 +119,7 @@ def fill_bin(lb, ub, pools, K=300, G0=22000):
                 cands += _sample(p, hi, K)
                 # big items first: backtracking then only uses small items when needed
                 res = _dp_close(sorted(cands, key=lambda c: -c[1][0]), g, hi)
-                if res is not None and sum(it[0] for _, it in res) - g <= max(2, (hi - g) // 50):
+                if res is not None and sum(it[0] for _, it in res) - g <= max(2, (hi - g) // TOL_DIV):
                     break
     if res is None:
         for p, it in taken:
@@ -129,7 +130,7 @@ def fill_bin(lb, ub, pools, K=300, G0=22000):
     return taken + res
 
 
-def assign(inst, plan, seed=0, order="lb_desc"):
+def assign(inst, plan, seed=0, order="lb_desc", exclude=()):
     """Returns (dataMappings, modelMappings, failed_models)."""
     M = inst["models"]
     D = inst["datasets"]
@@ -141,7 +142,10 @@ def assign(inst, plan, seed=0, order="lb_desc"):
 
     free = {t: Pool([]) for t in TYPES}
     copy = {t: Pool([]) for t in TYPES}
+    exclude = set(exclude)
     for d in D:
+        if d["id"] in exclude:
+            continue
         (copy if d["isCopyrighted"] else free)[d["dataType"]].put((d["size"], d["id"]))
 
     data_map = {}  # dataset -> model

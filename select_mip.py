@@ -24,7 +24,7 @@ def load(path):
 
 
 def build_and_solve(inst, alpha_free=1.0, alpha_tot=1.0, extra=0.0, time_limit=120,
-                    forced_off=(), gap=1e-7, verbose=False):
+                    forced_off=(), gap=1e-7, verbose=False, resid=None, lp=False):
     M = inst["models"]
     D = inst["datasets"]
     cap = inst["energyCap"]
@@ -35,6 +35,9 @@ def build_and_solve(inst, alpha_free=1.0, alpha_tot=1.0, extra=0.0, time_limit=1
         T[d["dataType"]] += d["size"]
         if not d["isCopyrighted"]:
             F[d["dataType"]] += d["size"]
+    spare = {t: 0 for t in TYPES}
+    if resid:  # residual problem: remaining data, energy and spare sources
+        F, T, cap, spare = resid["F"], resid["T"], resid["cap"], resid["spare"]
 
     bad = np.zeros(nM, bool)
     mono = np.zeros(nM, bool)
@@ -86,19 +89,19 @@ def build_and_solve(inst, alpha_free=1.0, alpha_tot=1.0, extra=0.0, time_limit=1
     for t in TYPES:
         rlo += [-np.inf]; rhi += [alpha_tot]
     for t in TYPES:
-        rlo += [-np.inf]; rhi += [0]
+        rlo += [-np.inf]; rhi += [spare[t]]
     for k, (i, t, lb, isb) in enumerate(zlist):
         need = (lb + extra) / max(F[t], 1)
         if not isb:
             rows.append(rfree[t]); cols.append(fo + i); vals.append(need)
-            rows.append(rtot[t]); cols.append(fo + i); vals.append((lb + extra) / T[t])
-            rows.append(rtot[t]); cols.append(ho + i); vals.append((lb + extra) / T[t])
-            rows.append(rtot[t]); cols.append(zo + k); vals.append(-(lb + extra) / T[t])
+            rows.append(rtot[t]); cols.append(fo + i); vals.append((lb + extra) / max(T[t], 1))
+            rows.append(rtot[t]); cols.append(ho + i); vals.append((lb + extra) / max(T[t], 1))
+            rows.append(rtot[t]); cols.append(zo + k); vals.append(-(lb + extra) / max(T[t], 1))
         rows.append(rsrc[t]); cols.append(zo + k); vals.append(1)
     for i, m in enumerate(M):
         if mono[i] and not bad[i]:
             t, rr = next(iter(m["dataRequirements"].items()))
-            rows.append(rtot[t]); cols.append(so + i); vals.append((rr["lowerBound"] + extra) / T[t])
+            rows.append(rtot[t]); cols.append(so + i); vals.append((rr["lowerBound"] + extra) / max(T[t], 1))
             rows.append(rsrc[t]); cols.append(so + i); vals.append(-1)
     # 6. energy
     for i, m in enumerate(M):
@@ -108,10 +111,10 @@ def build_and_solve(inst, alpha_free=1.0, alpha_tot=1.0, extra=0.0, time_limit=1
     rlo.append(-np.inf); rhi.append(1.0); r += 1
 
     A = coo_matrix((vals, (rows, cols)), shape=(r, nV)).tocsr()
-    res = milp(c, constraints=LinearConstraint(A, rlo, rhi), integrality=np.ones(nV),
+    res = milp(c, constraints=LinearConstraint(A, rlo, rhi), integrality=np.zeros(nV) if lp else np.ones(nV),
                bounds=Bounds(lbv, ubv),
                options={"time_limit": time_limit, "disp": verbose, "mip_rel_gap": gap})
-    x = np.round(res.x).astype(int)
+    x = (res.x > 0.999).astype(int) if lp else np.round(res.x).astype(int)
     plan = {"full": [], "half": [], "source": [], "srcreq": []}
     for i in range(nM):
         if x[fo + i]: plan["full"].append(i)

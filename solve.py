@@ -91,17 +91,18 @@ def score_of(inst_txt, sol):
     return getSolutionScore(json.dumps(sol), inst_txt, show_details=False)
 
 
-def run(path, tl=120, alpha=0.995, extra=0.0, seeds=(0,), orders=("lb_asc", "lb_desc", "width")):
+def run(path, tl=120, alpha=0.995, extra=0.0, lp=False, alpha_free=None, seeds=(0,), orders=("lb_asc", "lb_desc", "width")):
     with open(path) as f:
         txt = f.read()
     inst = json.loads(txt)
     os.makedirs("plans", exist_ok=True)
-    pf = f"plans/{os.path.basename(path)[:-5]}_{alpha}_{extra}.json"
+    af = alpha if alpha_free is None else alpha_free
+    pf = f"plans/{os.path.basename(path)[:-5]}_{alpha}_{extra}{'' if alpha_free is None else f'_af{af}'}{'_lp' if lp else ''}.json"
     if os.path.exists(pf):
         with open(pf) as f:
             plan = json.load(f)
     else:
-        plan = build_and_solve(inst, alpha_free=alpha, alpha_tot=alpha, extra=extra, time_limit=tl)
+        plan = build_and_solve(inst, alpha_free=af, alpha_tot=alpha, extra=extra, time_limit=tl, lp=lp)
         with open(pf, "w") as f:
             json.dump(plan, f)
     print(f"  MIP obj {plan['obj']:.0f} full {len(plan['full'])} half {len(plan['half'])} "
@@ -144,6 +145,8 @@ if __name__ == "__main__":
     path = sys.argv[1]
     tl = float(sys.argv[2]) if len(sys.argv) > 2 else 120
     alpha = float(sys.argv[3]) if len(sys.argv) > 3 else 0.995
-    (sc, sol), plan = run(path, tl, alpha)
+    lp = len(sys.argv) > 4 and sys.argv[4] == "lp"
+    af = float(sys.argv[5]) if len(sys.argv) > 5 else None
+    (sc, sol), plan = run(path, tl, alpha, lp=lp, alpha_free=af)
     if sol:
         save_if_better(path, sc, sol)
