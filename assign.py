@@ -52,28 +52,47 @@ def try_close(pools, g, w, two_tries=60):
     return None
 
 
-def fill_bin(lb, ub, pools, reserve=5000):
-    """Greedy fill. Returns list of (pool, item) or None (and restores pools)."""
+def _dp_close(cands, g, hi):
+    """Subset of cands (list of (pool,item)) with minimal sum in [g, hi]."""
+    if hi < 0 or not cands:
+        return None
+    mask = (1 << (hi + 1)) - 1
+    reach = 1
+    snaps = []
+    for _, it in cands:
+        snaps.append(reach)
+        reach = (reach | (reach << it[0])) & mask
+    top = reach >> g
+    if not top:
+        return None
+    S = g + ((top & -top).bit_length() - 1)
+    out = []
+    for k in range(len(cands) - 1, -1, -1):
+        if S == 0:
+            break
+        if not (snaps[k] >> S) & 1:
+            out.append(cands[k])
+            S -= cands[k][1][0]
+    return out
+
+
+def _sample(p, hi, K):
+    n = p.s.bisect_right((hi, 1 << 60))
+    if n <= K:
+        return [(p, p.s[j]) for j in range(n)]
+    step = n / K
+    return [(p, p.s[int(j * step)]) for j in range(K)]
+
+
+def fill_bin(lb, ub, pools, K=300, G0=22000):
+    """Fill [lb, ub] with minimal waste. Returns list of (pool, item) or None."""
     taken = []
     cur = 0
-    w = ub - lb
-    while True:
-        g = lb - cur
-        if g <= 0:
-            return taken
-        if not any(len(p) for p in pools):
-            break
-        res = try_close(pools, g, w)
-        if res is not None:
-            for p, it in res:
-                p.take(it)
-            taken += res
-            return taken
-        # take one item leaving roughly `reserve` to close
-        target = g - reserve if g > reserve else g // 2
+    # phase 1: big items while far from the target
+    while lb - cur > G0:
         pick = None
         for p in pools:
-            it = p.largest_le(max(target, 1))
+            it = p.largest_le(min(lb - cur - G0 + 10000, ub - cur))
             if it is not None:
                 pick = (p, it)
                 break
@@ -82,9 +101,32 @@ def fill_bin(lb, ub, pools, reserve=5000):
         pick[0].take(pick[1])
         taken.append(pick)
         cur += pick[1][0]
-    for p, it in taken:
-        p.put(it)
-    return None
+    g, hi = max(lb - cur, 0), ub - cur
+    res = None
+    if g == 0:
+        res = []
+    else:
+        # quick single-item close
+        for p in pools:
+            it = p.smallest_ge(g)
+            if it is not None and it[0] - g <= max(2, (hi - g) // 50) and it[0] <= hi:
+                res = [(p, it)]
+                break
+        if res is None:
+            cands = []
+            for p in pools:
+                cands += _sample(p, hi, K)
+                # big items first: backtracking then only uses small items when needed
+                res = _dp_close(sorted(cands, key=lambda c: -c[1][0]), g, hi)
+                if res is not None and sum(it[0] for _, it in res) - g <= max(2, (hi - g) // 50):
+                    break
+    if res is None:
+        for p, it in taken:
+            p.put(it)
+        return None
+    for p, it in res:
+        p.take(it)
+    return taken + res
 
 
 def assign(inst, plan, seed=0, order="lb_desc"):
@@ -115,7 +157,7 @@ def assign(inst, plan, seed=0, order="lb_desc"):
             r = M[i]["dataRequirements"].get(t)
             if r and (i, t) not in srcreq:
                 bins_any.append((i, r["lowerBound"], r["upperBound"]))
-        key = (lambda b: (b[2] - b[1], -b[1])) if order == "width" else (lambda b: -b[1])
+        key = {"width": lambda b: (b[2] - b[1], -b[1]), "lb_asc": lambda b: b[1]}.get(order, lambda b: -b[1])
         if order == "random":
             rnd.shuffle(bins_free); rnd.shuffle(bins_any)
         else:

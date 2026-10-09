@@ -91,11 +91,19 @@ def score_of(inst_txt, sol):
     return getSolutionScore(json.dumps(sol), inst_txt, show_details=False)
 
 
-def run(path, tl=120, alpha=0.995, extra=0.0, seeds=(0,), orders=("lb_desc",)):
+def run(path, tl=120, alpha=0.995, extra=0.0, seeds=(0,), orders=("lb_asc", "lb_desc", "width")):
     with open(path) as f:
         txt = f.read()
     inst = json.loads(txt)
-    plan = build_and_solve(inst, alpha_free=alpha, alpha_tot=alpha, extra=extra, time_limit=tl)
+    os.makedirs("plans", exist_ok=True)
+    pf = f"plans/{os.path.basename(path)[:-5]}_{alpha}_{extra}.json"
+    if os.path.exists(pf):
+        with open(pf) as f:
+            plan = json.load(f)
+    else:
+        plan = build_and_solve(inst, alpha_free=alpha, alpha_tot=alpha, extra=extra, time_limit=tl)
+        with open(pf, "w") as f:
+            json.dump(plan, f)
     print(f"  MIP obj {plan['obj']:.0f} full {len(plan['full'])} half {len(plan['half'])} "
           f"src {len(plan['source'])}", flush=True)
     best = (-1, None)

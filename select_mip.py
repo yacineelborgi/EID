@@ -24,7 +24,7 @@ def load(path):
 
 
 def build_and_solve(inst, alpha_free=1.0, alpha_tot=1.0, extra=0.0, time_limit=120,
-                    forced_off=(), gap=1e-5, verbose=False):
+                    forced_off=(), gap=1e-7, verbose=False):
     M = inst["models"]
     D = inst["datasets"]
     cap = inst["energyCap"]
