@@ -123,15 +123,17 @@ def main():
         except (OSError, ValueError):
             pass
         st = clone(best)
-        types = rng.sample(TYPES, rng.choice([1, 1, 2]))
-        mode = "full" if rng.random() < 0.5 else "mixed"
+        big = len(sys.argv) > 6 and sys.argv[6] == "big"
+        types = list(TYPES) if big else rng.sample(TYPES, rng.choice([1, 1, 2]))
+        mode = "full" if (big or rng.random() < 0.5) else "mixed"
         touched, dropped = ruin(st, rng, types, k_pair=rng.randint(2, 10), k_mono=rng.randint(0, 6), k_multi=rng.randint(0, 4), mode=mode)
         # release the items of some kept bins of the touched types: they must be refilled exactly
         refill, refill_hint = [], []
         cov = st.covered()
         kept_bins = [(m, t) for m in st.used if m not in st.src for t in st.M[m]["dataRequirements"]
                      if t in touched and (m, t) not in cov and st.bin_items.get((m, t))]
-        for (m, t) in rng.sample(kept_bins, min(len(kept_bins), rng.randint(20, 80))):
+        nref = rng.randint(150, 300) if big else rng.randint(20, 80)
+        for (m, t) in rng.sample(kept_bins, min(len(kept_bins), nref)):
             fo = st.is_full(m)
             its = list(st.bin_items[(m, t)])
             for i in its:
@@ -143,7 +145,7 @@ def main():
         fd, tin = tempfile.mkstemp(suffix=".json", dir=tmpdir); os.close(fd)
         tout, tpar = tin[:-5] + "_r.json", tin[:-5] + "_p.json"
         json.dump(st.to_sol(), open(tin, "w"))
-        json.dump({"multi_cands": mc, "extra_mono": em, "tlim": 60, "refill": refill, "refill_hint": refill_hint,
+        json.dump({"multi_cands": mc, "extra_mono": em, "tlim": 300 if big else 60, "refill": refill, "refill_hint": refill_hint,
                    "hint": {str(k): [v[0], v[1]] for k, v in getattr(st, "_hint", {}).items()}}, open(tpar, "w"))
         subprocess.run([sys.executable, "recreate.py", sys.argv[1], tin, tpar, tout], capture_output=True)
         if os.path.exists(tout):
