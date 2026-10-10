@@ -15,6 +15,8 @@ def solve(st, multi_cands=(), extra_mono=(), hint=None, tlim=60, cap_src=120, ca
           threads=1, log=False, refill=(), refill_hint=None):
     M, D = st.M, st.D
     cap = st.inst["energyCap"]
+    for m, t, fo in refill:  # kept models whose bins were emptied are still trained
+        st.used.add(m)
     ES = cap - sum(M[m]["energyCost"] for m in st.used)
     pool = {t: [d["id"] for d in D if d["dataType"] == t and d["id"] not in st.item_bin] for t in TYPES}
     unused = [i for i in range(len(M)) if i not in st.used]
