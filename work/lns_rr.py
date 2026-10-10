@@ -82,8 +82,20 @@ def main():
                          and all(q["upperBound"] >= q["lowerBound"] for q in M[m]["dataRequirements"].values())),
                         key=lambda m: -M[m]["value"] / (M[m]["energyCost"] * 2.8e-10 + 0.0052 * sum(q["lowerBound"] for q in M[m]["dataRequirements"].values()) + 1))[:400]
     print("start", best_sc, flush=True)
+    shared = os.path.join(os.path.dirname(os.path.abspath(out)), "rr_shared.json")
+    shared_sc = shared + ".score"
     for it in range(iters):
         t0 = time.time()
+        try:
+            ssc = int(open(shared_sc).read())
+            if ssc > best_sc:
+                cand = State(inst, json.load(open(shared)))
+                c_sc, c_ok, _ = cand.score()
+                if c_ok and c_sc > best_sc:
+                    best, best_sc = cand, c_sc
+                    print(f"it {it} loaded shared best {best_sc}", flush=True)
+        except (OSError, ValueError):
+            pass
         st = clone(best)
         types = rng.sample(TYPES, rng.choice([1, 1, 2]))
         touched, dropped = ruin(st, rng, types, k_pair=rng.randint(1, 4), k_mono=rng.randint(0, 3), k_multi=rng.randint(0, 2))
@@ -109,6 +121,13 @@ def main():
             best, best_sc = st, sc
             json.dump(st.to_sol(), open(out, "w"))
             tag = " NEW BEST"
+            try:
+                ssc = int(open(shared_sc).read())
+            except (OSError, ValueError):
+                ssc = 0
+            if sc > ssc:
+                json.dump(st.to_sol(), open(shared + ".tmp", "w")); os.replace(shared + ".tmp", shared)
+                open(shared_sc + ".tmp", "w").write(str(sc)); os.replace(shared_sc + ".tmp", shared_sc)
         print(f"it {it} types {''.join(types)} touched {''.join(sorted(touched))} -> {sc} ok={ok} best {best_sc} {time.time()-t0:.0f}s{tag}", flush=True)
 
 
