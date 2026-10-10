@@ -29,3 +29,20 @@ pip install highspy scipy numpy sortedcontainers
 python solve.py datasets/2_medium.json [temps_limite_mip_s] [alpha]
 python test_solution.py -d datasets/2_medium.json -s solutions/2_medium_submission.json
 ```
+
+## Scripts spécialisés (2e passe)
+
+Constat commun : un besoin avec `lowerBound` minuscule consomme quand même un dataset entier.
+`select_mip.py` accepte donc `tiny_lb` (coût exact « k-ième plus petit dataset libre ») et `free_margin`.
+
+- **4_precise** (fenêtres de largeur ~5, aucune source) : `lpinfo.py` (prix duaux LP) →
+  `mitm4.py` (meet-in-the-middle autour de l'optimum LP, KD-tree sur énergie + données libres) →
+  `pack4.py` (packing exact + ruin & recreate). `mip4.py` = MIP dédiée.
+- **6_shortage** : `select_mip2.py` (coût convexe des petits besoins) + `solve2.py`
+  (redémarrages avec bruit, réparation par échanges, appariement optimal des sources, ajout glouton).
+- **2_medium** : `plan_med.py` + `exact_pack.py` + `med_solve.py`.
+- **5_energy / 7_big** : `exact_assign.py`, `energy_iter.py` (MIP corrigée du gaspillage mesuré),
+  `big_opt.py` + `rmip.py` (LP → fixation par coûts réduits → MIP restreinte), `eval_plan.py`.
+
+`solve.strict_ok` refuse toute solution avec un id hors bornes ou un modèle utilisé deux fois
+(le correcteur fourni ne le vérifie pas).
