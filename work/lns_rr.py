@@ -8,7 +8,8 @@ import json, sys, random, copy, collections, time
 sys.path.insert(0, '.')
 sys.path.insert(0, '..')
 from sol6 import State, TYPES
-import compact, resid_add, roles
+import subprocess, os, tempfile
+import compact, resid_add  # roles (highspy) runs in a subprocess: highspy and ortools clash
 from solve import strict_ok
 
 
@@ -68,6 +69,7 @@ def main():
     out = sys.argv[3]
     iters, seed = int(sys.argv[4]), int(sys.argv[5])
     rng = random.Random(seed)
+    tmpdir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(out)))
     best_sc = best.score()[0]
     print("start", best_sc, flush=True)
     for it in range(iters):
@@ -78,13 +80,19 @@ def main():
         for t in touched:
             compact.compact(st, t, rounds=2, seed=rng.randrange(10 ** 6), log=False, pairs=60)
         resid_add.add_models(st, tlim=60, log=False)
-        try:
-            r = roles.solve_roles(st, tlim=120)
-            if r["obj"] >= r["cur"]:
-                roles.apply_roles(st, r)
-        except AssertionError:
-            pass
         sc, ok, msg = st.score()
+        if ok:
+            fd, tin = tempfile.mkstemp(suffix=".json", dir=tmpdir); os.close(fd)
+            tout = tin[:-5] + "_r.json"
+            json.dump(st.to_sol(), open(tin, "w"))
+            subprocess.run([sys.executable, "roles.py", sys.argv[1], tin, tout, "120"], capture_output=True)
+            if os.path.exists(tout):
+                st2 = State(inst, json.load(open(tout)))
+                sc2, ok2, _ = st2.score()
+                if ok2 and sc2 >= sc:
+                    st, sc = st2, sc2
+                os.remove(tout)
+            os.remove(tin)
         tag = ""
         if ok and sc > best_sc and strict_ok(inst, st.to_sol()):
             best, best_sc = st, sc
