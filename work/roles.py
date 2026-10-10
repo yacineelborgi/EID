@@ -11,7 +11,7 @@ sys.path.insert(0, '.')
 from sol6 import State, TYPES
 
 
-def solve_roles(st, tlim=300, emax_src=None, verbose=False, gap=0.0, topk=8):
+def solve_roles(st, tlim=300, emax_src=None, verbose=False, gap=0.0, topk=8, threads=1):
     M, D = st.M, st.D
     cap = st.inst["energyCap"]
     cov = st.covered()
@@ -86,20 +86,6 @@ def solve_roles(st, tlim=300, emax_src=None, verbose=False, gap=0.0, topk=8):
     ent = [(c, M[i]["energyCost"] / 1e9) for j, i, c in a_idx] + [(z_idx[i], M[i]["energyCost"] / 1e9) for i in z_idx]
     row(ent, -np.inf, (cap - E_fixed) / 1e9)
     A = coo_matrix((vals, (rows, colsA)), shape=(nr, nc)).tocsc()
-    h = highspy.Highs()
-    h.setOptionValue("output_flag", verbose)
-    h.setOptionValue("time_limit", tlim)
-    h.setOptionValue("mip_rel_gap", gap)
-    lp = highspy.HighsLp()
-    lp.num_col_ = nc; lp.num_row_ = nr
-    lp.col_cost_ = np.array(cols_cost); lp.col_lower_ = np.zeros(nc); lp.col_upper_ = np.ones(nc)
-    lp.row_lower_ = np.array(rlo, float); lp.row_upper_ = np.array(rhi, float)
-    lp.a_matrix_.format_ = highspy.MatrixFormat.kColwise
-    lp.a_matrix_.start_ = A.indptr; lp.a_matrix_.index_ = A.indices; lp.a_matrix_.value_ = A.data
-    lp.sense_ = highspy.ObjSense.kMaximize
-    lp.integrality_ = [highspy.HighsVarType.kInteger] * nc
-    h.passModel(lp)
-    # hint: current
     x0 = np.zeros(nc)
     for j, i, c in a_idx:
         if slots[j][0] == i:
@@ -107,11 +93,14 @@ def solve_roles(st, tlim=300, emax_src=None, verbose=False, gap=0.0, topk=8):
     for i in pure_t:
         if i in z_idx:
             x0[z_idx[i]] = 1
-    sol = highspy.HighsSolution(); sol.col_value = list(x0); sol.value_valid = True
-    h.setSolution(sol)
-    h.run()
-    x = np.array(h.getSolution().col_value)
-    info = h.getInfo()
+    import solver
+    x, obj, bnd = solver.milp(np.array(cols_cost), A, rlo, rhi, "max", tlim, threads, x0, gap, verbose)
+    if not np.isfinite(obj):
+        x, obj = x0, float(np.dot(cols_cost, x0))
+
+    class _I:
+        pass
+    info = _I(); info.objective_function_value = obj; info.mip_dual_bound = bnd
     cur_val = sum(M[i]["value"] // 2 for i in pure_t)
     return dict(x=x, a_idx=a_idx, z_idx=z_idx, slots=slots, obj=info.objective_function_value,
                 bound=info.mip_dual_bound, cur=cur_val, fixed_models=fixed_models, pure_t=pure_t, nvars=nc)

@@ -155,20 +155,7 @@ def solve(st, multi_cands=(), extra_mono=(), hint=None, tlim=60, cap_src=120, ca
     row(ent, -np.inf, ES / 1e9)
     n = len(cost)
     A = coo_matrix((vals, (rows, cols)), shape=(nr[0], n)).tocsc()
-    h = highspy.Highs()
-    h.setOptionValue("output_flag", log)
-    h.setOptionValue("time_limit", float(tlim))
-    h.setOptionValue("threads", threads)
-    h.setOptionValue("mip_rel_gap", 0.0)
-    lp = highspy.HighsLp()
-    lp.num_col_ = n; lp.num_row_ = nr[0]
-    lp.col_cost_ = np.array(cost); lp.col_lower_ = np.zeros(n); lp.col_upper_ = np.ones(n)
-    lp.row_lower_ = np.array(rlo, float); lp.row_upper_ = np.array(rhi, float)
-    lp.a_matrix_.format_ = highspy.MatrixFormat.kColwise
-    lp.a_matrix_.start_ = A.indptr; lp.a_matrix_.index_ = A.indices; lp.a_matrix_.value_ = A.data
-    lp.sense_ = highspy.ObjSense.kMaximize
-    lp.integrality_ = [highspy.HighsVarType.kInteger] * n
-    h.passModel(lp)
+    x0 = None
     if hint or refill:
         x0 = np.zeros(n)
         for mk, (kind, bins) in hint.items():
@@ -189,12 +176,15 @@ def solve(st, multi_cands=(), extra_mono=(), hint=None, tlim=60, cap_src=120, ca
             for i in its:
                 if i in xv[key]:
                     x0[xv[key][i]] = 1
-        s0 = highspy.HighsSolution(); s0.col_value = list(x0); s0.value_valid = True
-        h.setSolution(s0)
-    h.run()
-    sol = np.array(h.getSolution().col_value)
-    info = h.getInfo()
-    gain = info.objective_function_value
+    import solver
+    sol, gain, bound = solver.milp(np.array(cost), A, rlo, rhi, "max", tlim, threads, x0, 0.0, log)
+    if not np.isfinite(gain):
+        # no solution found: keep the hint (it is feasible by construction)
+        sol, gain = (x0 if x0 is not None else np.zeros(n)), float(np.dot(cost, x0 if x0 is not None else np.zeros(n)))
+
+    class _I:
+        pass
+    info = _I(); info.objective_function_value = gain; info.mip_dual_bound = bound
     # apply
     for key in rkeys:
         m, t, _ = key

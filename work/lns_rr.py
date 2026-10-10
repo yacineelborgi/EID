@@ -132,7 +132,7 @@ def main():
         cov = st.covered()
         kept_bins = [(m, t) for m in st.used if m not in st.src for t in st.M[m]["dataRequirements"]
                      if t in touched and (m, t) not in cov and st.bin_items.get((m, t))]
-        nref = rng.randint(150, 300) if big else rng.randint(20, 80)
+        nref = rng.randint(int(os.environ.get("REFILL_MIN", 150)), int(os.environ.get("REFILL_MAX", 300))) if big else rng.randint(20, 80)
         chosen = set()
         if rng.random() < 0.5:
             # tiny bins and holders of the smallest datasets of the touched types
@@ -157,7 +157,8 @@ def main():
         fd, tin = tempfile.mkstemp(suffix=".json", dir=tmpdir); os.close(fd)
         tout, tpar = tin[:-5] + "_r.json", tin[:-5] + "_p.json"
         json.dump(st.to_sol(), open(tin, "w"))
-        json.dump({"multi_cands": mc, "extra_mono": em, "tlim": 300 if big else 60, "refill": refill, "refill_hint": refill_hint,
+        json.dump({"multi_cands": mc, "extra_mono": em, "threads": int(os.environ.get("THREADS", 1)),
+                   "tlim": int(os.environ.get("BIG_TLIM", 300)) if big else 60, "refill": refill, "refill_hint": refill_hint,
                    "hint": {str(k): [v[0], v[1]] for k, v in getattr(st, "_hint", {}).items()}}, open(tpar, "w"))
         subprocess.run([sys.executable, "recreate.py", sys.argv[1], tin, tpar, tout], capture_output=True)
         if os.path.exists(tout):
