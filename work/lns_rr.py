@@ -56,7 +56,7 @@ def ruin(st, rng, types, k_pair, k_mono, k_multi, mode="mixed"):
     victims = []
     if mode == "full":
         fulls = [m for m in st.used if m not in st.src and not st.tgt.get(m) and any(t in M[m]["dataRequirements"] for t in types)]
-        victims += rng.sample(fulls, min(len(fulls), rng.randint(3, 10)))
+        victims += rng.sample(fulls, min(len(fulls), rng.randint(5, 30)))
         k_pair = k_mono = k_multi = 0
     elif rng.random() < 0.5:
         # targets whose sources burn the most energy, and the lowest value-per-energy targets
@@ -65,7 +65,7 @@ def ruin(st, rng, types, k_pair, k_mono, k_multi, mode="mixed"):
             if any(mono_t(s) == t for t in types):
                 tg_cost[tg] += M[s]["energyCost"]
         tgs = sorted(tg_cost, key=lambda m: -(tg_cost[m] + M[m]["energyCost"]) / (M[m]["value"] // 2 + 1))[:60]
-        victims += rng.sample(tgs, min(len(tgs), rng.randint(2, 6)))
+        victims += rng.sample(tgs, min(len(tgs), rng.randint(3, 15)))
         k_pair = 0
     for t in types:
         pairs = [(s, tg) for s, tg in st.src.items() if mono_t(s) == t and mono_t(tg) == t and len(st.tgt[tg]) == 1]
@@ -125,29 +125,27 @@ def main():
         st = clone(best)
         types = rng.sample(TYPES, rng.choice([1, 1, 2]))
         mode = "full" if rng.random() < 0.5 else "mixed"
-        touched, dropped = ruin(st, rng, types, k_pair=rng.randint(1, 4), k_mono=rng.randint(0, 3), k_multi=rng.randint(0, 2), mode=mode)
+        touched, dropped = ruin(st, rng, types, k_pair=rng.randint(2, 10), k_mono=rng.randint(0, 6), k_multi=rng.randint(0, 4), mode=mode)
         if mode == "mixed":
             for t in touched:
                 compact.compact(st, t, rounds=2, seed=rng.randrange(10 ** 6), log=False, pairs=60)
-        mc = [m for m in dropped if len(st.M[m]["dataRequirements"]) > 1] + LP_MULTI + LP_POS_MULTI + rng.sample(multi_pool, 30)
+        mc = [m for m in dropped if len(st.M[m]["dataRequirements"]) > 1] + LP_MULTI + LP_POS_MULTI + rng.sample(multi_pool, 60)
         em = [m for m in dropped if len(st.M[m]["dataRequirements"]) == 1] + LP_POS_MONO
-        resid_add.add_models(st, tlim=60, log=False, multi_cands=mc, extra_mono=em, workers=2, hint=getattr(st, '_hint', None))
-        if mode == "full":
+        fd, tin = tempfile.mkstemp(suffix=".json", dir=tmpdir); os.close(fd)
+        tout, tpar = tin[:-5] + "_r.json", tin[:-5] + "_p.json"
+        json.dump(st.to_sol(), open(tin, "w"))
+        json.dump({"multi_cands": mc, "extra_mono": em, "tlim": 60,
+                   "hint": {str(k): [v[0], v[1]] for k, v in getattr(st, "_hint", {}).items()}}, open(tpar, "w"))
+        subprocess.run([sys.executable, "recreate.py", sys.argv[1], tin, tpar, tout], capture_output=True)
+        if os.path.exists(tout):
+            st = State(inst, json.load(open(tout)))
+            os.remove(tout)
+        for f in (tin, tpar):
+            os.remove(f)
+        if mode == "full" or rng.random() < 0.3:
             for t in touched:
                 compact.compact(st, t, rounds=1, seed=rng.randrange(10 ** 6), log=False, pairs=30)
         sc, ok, msg = st.score()
-        if ok:
-            fd, tin = tempfile.mkstemp(suffix=".json", dir=tmpdir); os.close(fd)
-            tout = tin[:-5] + "_r.json"
-            json.dump(st.to_sol(), open(tin, "w"))
-            subprocess.run([sys.executable, "roles.py", sys.argv[1], tin, tout, "120"], capture_output=True)
-            if os.path.exists(tout):
-                st2 = State(inst, json.load(open(tout)))
-                sc2, ok2, _ = st2.score()
-                if ok2 and sc2 >= sc:
-                    st, sc = st2, sc2
-                os.remove(tout)
-            os.remove(tin)
         tag = ""
         if ok and sc > best_sc and strict_ok(inst, st.to_sol()):
             best, best_sc = st, sc
