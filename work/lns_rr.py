@@ -13,6 +13,9 @@ import compact, resid_add  # roles (highspy) runs in a subprocess: highspy and o
 from solve import strict_ok
 
 
+LP_MULTI = [9201, 13322, 8556, 935, 2930]
+
+
 def clone(st):
     n = object.__new__(State)
     n.inst, n.M, n.D = st.inst, st.M, st.D
@@ -56,11 +59,14 @@ def ruin(st, rng, types, k_pair, k_mono, k_multi):
         cand = multis[:max(40, 4 * k_multi)]
         victims += rng.sample(cand, min(k_multi, len(cand)))
     touched = set(types)
+    dropped = set()
     for m in set(victims):
         if m in st.used:
             touched |= set(M[m]["dataRequirements"])
+            before = set(st.used)
             drop(st, m)
-    return touched
+            dropped |= before - st.used
+    return touched, dropped
 
 
 def main():
@@ -71,15 +77,20 @@ def main():
     rng = random.Random(seed)
     tmpdir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(out)))
     best_sc = best.score()[0]
+    M = best.M
+    multi_pool = sorted((m for m in range(len(M)) if m not in best.used and len(M[m]["dataRequirements"]) > 1
+                         and all(q["upperBound"] >= q["lowerBound"] for q in M[m]["dataRequirements"].values())),
+                        key=lambda m: -M[m]["value"] / (M[m]["energyCost"] * 2.8e-10 + 0.0052 * sum(q["lowerBound"] for q in M[m]["dataRequirements"].values()) + 1))[:400]
     print("start", best_sc, flush=True)
     for it in range(iters):
         t0 = time.time()
         st = clone(best)
         types = rng.sample(TYPES, rng.choice([1, 1, 2]))
-        touched = ruin(st, rng, types, k_pair=rng.randint(1, 4), k_mono=rng.randint(0, 3), k_multi=rng.randint(0, 2))
+        touched, dropped = ruin(st, rng, types, k_pair=rng.randint(1, 4), k_mono=rng.randint(0, 3), k_multi=rng.randint(0, 2))
         for t in touched:
             compact.compact(st, t, rounds=2, seed=rng.randrange(10 ** 6), log=False, pairs=60)
-        resid_add.add_models(st, tlim=60, log=False)
+        mc = [m for m in dropped if len(st.M[m]["dataRequirements"]) > 1] + LP_MULTI + rng.sample(multi_pool, 30)
+        resid_add.add_models(st, tlim=60, log=False, multi_cands=mc)
         sc, ok, msg = st.score()
         if ok:
             fd, tin = tempfile.mkstemp(suffix=".json", dir=tmpdir); os.close(fd)

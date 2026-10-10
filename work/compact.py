@@ -50,7 +50,7 @@ def step_singles(st, t, bins, freeonly):
         return 0
     opts = []  # (size, [items])
     for i in pool_items(st, t):
-        if (not freeonly) or not D[i]["isCopyrighted"]:
+        if freeonly != bool(D[i]["isCopyrighted"]):  # free bins: free items; A bins: copyrighted only
             opts.append((D[i]["size"], [i]))
     for k in sel:
         its = list(st.bin_items[k])
@@ -117,7 +117,7 @@ def step_bins(st, t, bins, rng, max_pool=60):
         cur = sum(D[i]["size"] for i in own)
         if cur == lb:
             continue
-        pool = [i for i in pool_items(st, t) if (not fo) or not D[i]["isCopyrighted"]]
+        pool = [i for i in pool_items(st, t) if fo != bool(D[i]["isCopyrighted"])]
         # candidate pool items: smaller than ub, sample
         pool = [i for i in pool if D[i]["size"] <= ub]
         if len(pool) > max_pool:
@@ -161,6 +161,8 @@ def step_pairs(st, t, bins, rng, npairs=200, max_pool=40, tlim=0.5, group=3):
             lb, ub, fo = bins[k]
             for i in items:
                 if D[i]["size"] <= ub and (not fo or not D[i]["isCopyrighted"]):
+                    if not fo and not D[i]["isCopyrighted"] and i not in own:
+                        continue  # keep free pool items for full models
                     x[i, bi] = mdl.NewBoolVar("")
         byi = collections.defaultdict(list)
         for (i, bi), v in x.items():

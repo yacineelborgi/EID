@@ -11,7 +11,7 @@ sys.path.insert(0, '.')
 from sol6 import State, TYPES
 
 
-def add_models(st, tlim=60, emax_src=3e11, max_tgt=300, max_full=300, workers=4, log=True):
+def add_models(st, tlim=60, emax_src=3e11, max_tgt=300, max_full=300, workers=4, log=True, multi_cands=()):
     M, D = st.M, st.D
     cap = st.inst["energyCap"]
     E_used = 0
@@ -67,6 +67,35 @@ def add_models(st, tlim=60, emax_src=3e11, max_tgt=300, max_full=300, workers=4,
                     obj.append(M[m]["value"] * y)
                 else:
                     obj.append((M[m]["value"] // 2) * y)
+    # multi-type candidates: full (free pool items only) or half (any pool items), no sources
+    multi_bins = {}
+    for m in multi_cands:
+        if m in st.used:
+            continue
+        r = M[m]["dataRequirements"]
+        if len(r) < 2 or any(q["upperBound"] < q["lowerBound"] for q in r.values()) or M[m]["energyCost"] > ES:
+            continue
+        for mode in ("full", "half"):
+            ok = True
+            for t, q in r.items():
+                vol = sum(D[i]["size"] for i in pool[t] if mode == "half" or not D[i]["isCopyrighted"])
+                if vol < q["lowerBound"]:
+                    ok = False
+            if not ok:
+                continue
+            y = mdl.NewBoolVar(""); roles[m].append(y)
+            multi_bins[(m, mode)] = y
+            for t, q in r.items():
+                key = (m, t, "M" + mode)
+                for i in pool[t]:
+                    if D[i]["size"] <= q["upperBound"] and (mode == "half" or not D[i]["isCopyrighted"]):
+                        x[key][i] = mdl.NewBoolVar("")
+                e = sum(D[i]["size"] * v for i, v in x[key].items())
+                mdl.Add(e >= q["lowerBound"]).OnlyEnforceIf(y)
+                mdl.Add(e <= q["upperBound"] * y)
+                ybin[key] = y
+            energy.append(M[m]["energyCost"] * y)
+            obj.append((M[m]["value"] if mode == "full" else M[m]["value"] // 2) * y)
     for m, vs in roles.items():
         if len(vs) > 1:
             mdl.AddAtMostOne(vs)
