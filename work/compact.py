@@ -202,15 +202,16 @@ def step_pairs(st, t, bins, rng, npairs=200, max_pool=40, tlim=0.5, group=3):
     return gained
 
 
-def compact(st, t, rounds=3, seed=0, log=True, pairs=0):
+def compact(st, t, rounds=3, seed=0, log=True, pairs=0, free_only=False):
     rng = random.Random(seed)
     bins = type_bins(st, t)
     D = st.D
     for r in range(rounds):
         g1 = step_singles(st, t, bins, True)
-        g2 = step_singles(st, t, bins, False)
-        g3 = step_bins(st, t, bins, rng)
-        g4 = step_pairs(st, t, bins, rng, npairs=pairs) if pairs else 0
+        g2 = 0 if free_only else step_singles(st, t, bins, False)
+        sub = {k: v for k, v in bins.items() if v[2]} if free_only else bins
+        g3 = step_bins(st, t, sub, rng)
+        g4 = step_pairs(st, t, sub, rng, npairs=pairs) if pairs else 0
         pv = sum(D[i]["size"] for i in pool_items(st, t))
         if log:
             print(f"  {t} round {r}: singlesF {g1} singlesA {g2} bins {g3} groups {g4} pool {pv}", flush=True)
@@ -222,6 +223,7 @@ if __name__ == "__main__":
     sol = json.load(open(sys.argv[2]))
     st = State(inst, sol)
     for t in sys.argv[3]:
-        compact(st, t, rounds=int(sys.argv[4]), pairs=int(sys.argv[5]), seed=int(sys.argv[6]))
+        compact(st, t, rounds=int(sys.argv[4]), pairs=int(sys.argv[5]), seed=int(sys.argv[6]),
+                free_only=len(sys.argv) > 8 and sys.argv[8] == "free")
     print(st.score())
     json.dump(st.to_sol(), open(sys.argv[7], "w"))
