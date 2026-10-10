@@ -126,9 +126,6 @@ def main():
         types = rng.sample(TYPES, rng.choice([1, 1, 2]))
         mode = "full" if rng.random() < 0.5 else "mixed"
         touched, dropped = ruin(st, rng, types, k_pair=rng.randint(2, 10), k_mono=rng.randint(0, 6), k_multi=rng.randint(0, 4), mode=mode)
-        if mode == "mixed":
-            for t in touched:
-                compact.compact(st, t, rounds=2, seed=rng.randrange(10 ** 6), log=False, pairs=60)
         mc = [m for m in dropped if len(st.M[m]["dataRequirements"]) > 1] + LP_MULTI + LP_POS_MULTI + rng.sample(multi_pool, 60)
         em = [m for m in dropped if len(st.M[m]["dataRequirements"]) == 1] + LP_POS_MONO
         fd, tin = tempfile.mkstemp(suffix=".json", dir=tmpdir); os.close(fd)
@@ -142,11 +139,13 @@ def main():
             os.remove(tout)
         for f in (tin, tpar):
             os.remove(f)
-        if mode == "full" or rng.random() < 0.3:
-            for t in touched:
-                compact.compact(st, t, rounds=1, seed=rng.randrange(10 ** 6), log=False, pairs=30)
+        for t in touched:
+            compact.compact(st, t, rounds=1, seed=rng.randrange(10 ** 6), log=False, pairs=30)
         sc, ok, msg = st.score()
         tag = ""
+        if ok and sc == best_sc and strict_ok(inst, st.to_sol()):
+            best = st  # accept sideways moves (keeps compaction progress)
+            tag = " same"
         if ok and sc > best_sc and strict_ok(inst, st.to_sol()):
             best, best_sc = st, sc
             json.dump(st.to_sol(), open(out, "w"))
@@ -158,7 +157,7 @@ def main():
             if sc > ssc:
                 json.dump(st.to_sol(), open(shared + ".tmp", "w")); os.replace(shared + ".tmp", shared)
                 open(shared_sc + ".tmp", "w").write(str(sc)); os.replace(shared_sc + ".tmp", shared_sc)
-        print(f"it {it} types {''.join(types)} touched {''.join(sorted(touched))} -> {sc} ok={ok} best {best_sc} {time.time()-t0:.0f}s{tag}", flush=True)
+        print(f"it {it} {mode} types {''.join(types)} touched {''.join(sorted(touched))} -> {sc} ok={ok} best {best_sc} {time.time()-t0:.0f}s{tag}", flush=True)
 
 
 if __name__ == "__main__":
