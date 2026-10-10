@@ -13,7 +13,7 @@ import compact, resid_add  # roles (highspy) runs in a subprocess: highspy and o
 from solve import strict_ok
 
 
-LP_MULTI = [9201, 13322, 8556, 935, 2930]
+LP_MULTI = [9201, 13322, 8556, 935, 2930, 8223]
 
 
 def clone(st):
@@ -48,6 +48,15 @@ def ruin(st, rng, types, k_pair, k_mono, k_multi):
     M = st.M
     mono_t = lambda m: next(iter(M[m]["dataRequirements"])) if len(M[m]["dataRequirements"]) == 1 else None
     victims = []
+    if rng.random() < 0.5:
+        # targets whose sources burn the most energy, and the lowest value-per-energy targets
+        tg_cost = collections.defaultdict(float)
+        for s, tg in st.src.items():
+            if any(mono_t(s) == t for t in types):
+                tg_cost[tg] += M[s]["energyCost"]
+        tgs = sorted(tg_cost, key=lambda m: -(tg_cost[m] + M[m]["energyCost"]) / (M[m]["value"] // 2 + 1))[:60]
+        victims += rng.sample(tgs, min(len(tgs), rng.randint(2, 6)))
+        k_pair = 0
     for t in types:
         pairs = [(s, tg) for s, tg in st.src.items() if mono_t(s) == t and mono_t(tg) == t and len(st.tgt[tg]) == 1]
         for s, tg in rng.sample(pairs, min(k_pair, len(pairs))):
@@ -102,7 +111,7 @@ def main():
         for t in touched:
             compact.compact(st, t, rounds=2, seed=rng.randrange(10 ** 6), log=False, pairs=60)
         mc = [m for m in dropped if len(st.M[m]["dataRequirements"]) > 1] + LP_MULTI + rng.sample(multi_pool, 30)
-        resid_add.add_models(st, tlim=60, log=False, multi_cands=mc)
+        resid_add.add_models(st, tlim=60, log=False, multi_cands=mc, workers=2)
         sc, ok, msg = st.score()
         if ok:
             fd, tin = tempfile.mkstemp(suffix=".json", dir=tmpdir); os.close(fd)
