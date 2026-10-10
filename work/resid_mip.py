@@ -157,7 +157,7 @@ def solve(st, multi_cands=(), extra_mono=(), hint=None, tlim=60, cap_src=120, ca
     lp.sense_ = highspy.ObjSense.kMaximize
     lp.integrality_ = [highspy.HighsVarType.kInteger] * n
     h.passModel(lp)
-    if hint:
+    if hint or refill:
         x0 = np.zeros(n)
         for mk, (kind, bins) in hint.items():
             m = int(mk)

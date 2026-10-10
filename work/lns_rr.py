@@ -133,8 +133,20 @@ def main():
         kept_bins = [(m, t) for m in st.used if m not in st.src for t in st.M[m]["dataRequirements"]
                      if t in touched and (m, t) not in cov and st.bin_items.get((m, t))]
         nref = rng.randint(150, 300) if big else rng.randint(20, 80)
-        for (m, t) in rng.sample(kept_bins, min(len(kept_bins), nref)):
-            fo = st.is_full(m)
+        chosen = set()
+        if rng.random() < 0.5:
+            # tiny bins and holders of the smallest datasets of the touched types
+            src_bins = [(s, next(iter(st.M[s]["dataRequirements"]))) for s in st.src]
+            src_bins = [k for k in src_bins if k[1] in touched and st.bin_items.get(k)]
+            pool_b = kept_bins + src_bins
+            for t in touched:
+                small = set(i for _, i in sorted((d["size"], d["id"]) for d in st.D if d["dataType"] == t)[:rng.randint(60, 200)])
+                for k in pool_b:
+                    if k[1] == t and (st.M[k[0]]["dataRequirements"][t]["lowerBound"] <= 1000 or st.bin_items[k] & small):
+                        chosen.add(k)
+        chosen |= set(rng.sample(kept_bins, min(len(kept_bins), nref)))
+        for (m, t) in chosen:
+            fo = st.is_full(m) if m not in st.src else False
             its = list(st.bin_items[(m, t)])
             for i in its:
                 del st.item_bin[i]
