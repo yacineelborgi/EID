@@ -12,7 +12,7 @@ from sol6 import State, TYPES
 
 
 def solve(st, multi_cands=(), extra_mono=(), hint=None, tlim=60, cap_src=120, cap_data=120, emax_src=3e11, max_tgt=300,
-          threads=1, log=False):
+          threads=1, log=False, refill=(), refill_hint=None):
     M, D = st.M, st.D
     cap = st.inst["energyCap"]
     ES = cap - sum(M[m]["energyCost"] for m in st.used)
@@ -92,10 +92,28 @@ def solve(st, multi_cands=(), extra_mono=(), hint=None, tlim=60, cap_src=120, ca
                 for i in pool[t]:
                     if D[i]["size"] <= q["upperBound"] and (mode == "half" or not D[i]["isCopyrighted"]):
                         xv[key][i] = var(0)
+    # bins of kept models whose items were released: must be refilled (no y variable)
+    rkeys = []
+    for m, t, fo in refill:
+        key = (m, t, "R")
+        rkeys.append(key)
+        q = M[m]["dataRequirements"][t]
+        for i in pool[t]:
+            if D[i]["size"] <= q["upperBound"] and (not fo or not D[i]["isCopyrighted"]):
+                xv[key][i] = var(0)
     # bin constraints
     byi = collections.defaultdict(list)
+    for key in rkeys:
+        m, t, _ = key
+        q = M[m]["dataRequirements"][t]
+        d = xv[key]
+        row([(c, D[i]["size"]) for i, c in d.items()], q["lowerBound"], q["upperBound"])
+        for i, c in d.items():
+            byi[i].append(c)
     for key, d in xv.items():
         m, t, mode = key
+        if mode == "R":
+            continue
         q = M[m]["dataRequirements"][t]
         y = ybin[key]
         row([(c, D[i]["size"]) for i, c in d.items()] + [(y, -q["lowerBound"])], 0, np.inf)
@@ -152,6 +170,11 @@ def solve(st, multi_cands=(), extra_mono=(), hint=None, tlim=60, cap_src=120, ca
                     for i in its:
                         if i in xv[key]:
                             x0[xv[key][i]] = 1
+        for (m, t, fo), its in zip(refill, refill_hint or [[] for _ in refill]):
+            key = (m, t, "R")
+            for i in its:
+                if i in xv[key]:
+                    x0[xv[key][i]] = 1
         s0 = highspy.HighsSolution(); s0.col_value = list(x0); s0.value_valid = True
         h.setSolution(s0)
     h.run()
@@ -159,6 +182,11 @@ def solve(st, multi_cands=(), extra_mono=(), hint=None, tlim=60, cap_src=120, ca
     info = h.getInfo()
     gain = info.objective_function_value
     # apply
+    for key in rkeys:
+        m, t, _ = key
+        for i, c in xv[key].items():
+            if sol[c] > 0.5:
+                st.item_bin[i] = (m, t); st.bin_items[(m, t)].add(i)
     new_src = collections.defaultdict(list)
     done = set()
     for key, y in ybin.items():
@@ -191,6 +219,6 @@ if __name__ == "__main__":
     hint = {int(k): (v[0], v[1]) for k, v in p.get("hint", {}).items()}
     g, b = solve(st, p.get("multi_cands", []), p.get("extra_mono", []), hint, p.get("tlim", 60),
                  p.get("cap_src", 120), p.get("cap_data", 120), p.get("emax_src", 3e11), p.get("max_tgt", 300),
-                 p.get("threads", 1))
+                 p.get("threads", 1), refill=[tuple(r) for r in p.get("refill", [])], refill_hint=p.get("refill_hint"))
     print("gain", g, "bound", b, flush=True)
     json.dump(st.to_sol(), open(sys.argv[4], "w"))

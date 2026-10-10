@@ -10,7 +10,8 @@ st = State(inst, json.load(open(sys.argv[2])))
 p = json.load(open(sys.argv[3]))
 hint = {int(k): (v[0], v[1]) for k, v in p.get("hint", {}).items()}
 g, b = resid_mip.solve(st, p.get("multi_cands", []), p.get("extra_mono", []), hint, p.get("tlim", 60),
-                       p.get("cap_src", 120), p.get("cap_data", 120), p.get("emax_src", 3e11), p.get("max_tgt", 300))
+                       p.get("cap_src", 120), p.get("cap_data", 120), p.get("emax_src", 3e11), p.get("max_tgt", 300),
+                       refill=[tuple(r) for r in p.get("refill", [])], refill_hint=p.get("refill_hint"))
 print("resid", g, b, flush=True)
 try:
     r = roles.solve_roles(st, tlim=p.get("roles_tlim", 120))
