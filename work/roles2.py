@@ -13,13 +13,14 @@ sys.path.insert(0, '.')
 from sol6 import State, TYPES
 
 
-def solve_roles2(st, tlim=600, verbose=False, gap=0.0, threads=1):
+def solve_roles2(st, tlim=600, verbose=False, gap=0.0, threads=1, multi=False):
     M, D = st.M, st.D
     cap = st.inst["energyCap"]
     cov = st.covered()
     mono = lambda m: len(M[m]["dataRequirements"]) == 1
     pure_t = set(m for m in st.tgt if m in st.used and all((m, t) in cov for t in M[m]["dataRequirements"]))
-    slot_models = set(m for m in st.used if mono(m) and m not in pure_t)  # sources + mono data models
+    has_cov = set(m for m in st.used if any((m, t) in cov for t in M[m]["dataRequirements"]))
+    slot_models = set(m for m in st.used if m not in pure_t and (mono(m) or (multi and m not in has_cov and m not in st.src)))
     fixed_models = set(st.used) - slot_models - pure_t
     fixed_dem = collections.Counter()
     for m in fixed_models:
@@ -29,26 +30,42 @@ def solve_roles2(st, tlim=600, verbose=False, gap=0.0, threads=1):
     E_fixed = sum(M[m]["energyCost"] for m in fixed_models)
     slots = []
     for m in slot_models:
-        t = next(iter(M[m]["dataRequirements"]))
-        its = st.bin_items[(m, t)]
-        f = sum(D[i]["size"] for i in its)
-        fr = all(not D[i]["isCopyrighted"] for i in its)
-        slots.append((m, t, f, fr))
+        ts = tuple(sorted(M[m]["dataRequirements"]))
+        fills = []
+        fr = True
+        for t in ts:
+            its = st.bin_items[(m, t)]
+            fills.append(sum(D[i]["size"] for i in its))
+            fr = fr and all(not D[i]["isCopyrighted"] for i in its)
+        slots.append((m, ts if len(ts) > 1 else ts[0], fills if len(ts) > 1 else fills[0], fr))
     cand_models = [i for i in range(len(M)) if i not in fixed_models]
     monos = collections.defaultdict(list)
+    multis = collections.defaultdict(list)
     for i in cand_models:
         r = M[i]["dataRequirements"]
+        if any(q["upperBound"] < q["lowerBound"] for q in r.values()):
+            continue
         if len(r) == 1:
             t, q = next(iter(r.items()))
-            if q["upperBound"] >= q["lowerBound"]:
-                monos[t].append((q["lowerBound"], q["upperBound"], i))
+            monos[t].append((q["lowerBound"], q["upperBound"], i))
+        elif multi:
+            ts = tuple(sorted(r))
+            multis[ts].append(i)
     for t in monos:
         monos[t].sort()
     import bisect
-    cost, cols = [], []  # col descriptors
+    cost, cols = [], []
     nc = 0
     a_src, a_own = [], []
     for j, (m0, t, f, fr) in enumerate(slots):
+        if isinstance(t, tuple):
+            for i in multis[t]:
+                r = M[i]["dataRequirements"]
+                if all(r[tt]["lowerBound"] <= ff <= r[tt]["upperBound"] for tt, ff in zip(t, f)):
+                    val = M[i]["value"] if fr else M[i]["value"] // 2
+                    if val > 0 or i == m0:
+                        a_own.append((j, i, nc)); cost.append(float(val)); nc += 1
+            continue
         lst = monos[t]
         hi = bisect.bisect_right(lst, (f, 10 ** 12, 10 ** 12))
         for lb, ub, i in lst[:hi]:
@@ -129,10 +146,12 @@ def apply_roles2(st, res):
     x = res["x"]; slots = res["slots"]
     old_items = {}
     for j, (m0, t, f, fr) in enumerate(slots):
-        old_items[j] = list(st.bin_items[(m0, t)])
-        for d in old_items[j]:
-            del st.item_bin[d]
-        st.bin_items[(m0, t)] = set()
+        ts = t if isinstance(t, tuple) else (t,)
+        old_items[j] = {tt: list(st.bin_items[(m0, tt)]) for tt in ts}
+        for tt in ts:
+            for d in old_items[j][tt]:
+                del st.item_bin[d]
+            st.bin_items[(m0, tt)] = set()
     keep = set(res["fixed_models"])
     fixed_pairs = [(s, tg) for s, tg in st.src.items() if tg in keep]
     st.used = set(keep)
@@ -142,8 +161,9 @@ def apply_roles2(st, res):
         for j, i, c in lst:
             if x[c] > 0.5:
                 m0, t, f, fr = slots[j]
-                for d in old_items[j]:
-                    st.item_bin[d] = (i, t); st.bin_items[(i, t)].add(d)
+                for tt, ds in old_items[j].items():
+                    for d in ds:
+                        st.item_bin[d] = (i, tt); st.bin_items[(i, tt)].add(d)
                 st.used.add(i)
                 if kind == "src":
                     new_src[t].append(i)
@@ -174,7 +194,8 @@ if __name__ == "__main__":
     sol = json.load(open(sys.argv[2]))
     st = State(inst, sol)
     t0 = time.time()
-    res = solve_roles2(st, tlim=float(sys.argv[4]), threads=int(sys.argv[5]) if len(sys.argv) > 5 else 1)
+    res = solve_roles2(st, tlim=float(sys.argv[4]), threads=int(sys.argv[5]) if len(sys.argv) > 5 else 1,
+                       multi=len(sys.argv) > 6 and sys.argv[6] == "multi")
     print("vars", res["nvars"], "obj", res["obj"], "bound", res["bound"], "cur", res["cur"], "time", round(time.time() - t0), flush=True)
     apply_roles2(st, res)
     sc = st.score()
