@@ -13,13 +13,14 @@ import compact, resid_add  # roles (highspy) runs in a subprocess: highspy and o
 from solve import strict_ok
 
 
-LP_MULTI = [9201, 13322, 8556, 935, 2930, 8223]
-try:
-    import numpy as _np
-    _lp = json.load(open("lp6_pos.json"))
-    LP_POS_MULTI, LP_POS_MONO = _lp["multi"], _lp["mono"]
-except (OSError, ValueError):
-    LP_POS_MULTI, LP_POS_MONO = [], []
+LP_MULTI, LP_POS_MULTI, LP_POS_MONO = [], [], []
+if len(sys.argv) > 1 and "6_shortage" in sys.argv[1]:  # LP-guided candidates exist for file 6 only
+    LP_MULTI = [9201, 13322, 8556, 935, 2930, 8223]
+    try:
+        _lp = json.load(open("lp6_pos.json"))
+        LP_POS_MULTI, LP_POS_MONO = _lp["multi"], _lp["mono"]
+    except (OSError, ValueError):
+        pass
 
 
 def clone(st):
@@ -152,7 +153,7 @@ def main():
                 del st.item_bin[i]
             st.bin_items[(m, t)] = set()
             refill.append([m, t, fo]); refill_hint.append(its)
-        mc = [m for m in dropped if len(st.M[m]["dataRequirements"]) > 1] + LP_MULTI + LP_POS_MULTI + rng.sample(multi_pool, 60)
+        mc = [m for m in dropped if len(st.M[m]["dataRequirements"]) > 1] + LP_MULTI + LP_POS_MULTI + rng.sample(multi_pool, min(60, len(multi_pool)))
         em = [m for m in dropped if len(st.M[m]["dataRequirements"]) == 1] + LP_POS_MONO
         fd, tin = tempfile.mkstemp(suffix=".json", dir=tmpdir); os.close(fd)
         tout, tpar = tin[:-5] + "_r.json", tin[:-5] + "_p.json"
