@@ -12,7 +12,7 @@ from sol6 import State, TYPES
 
 
 def solve(st, multi_cands=(), extra_mono=(), hint=None, tlim=60, cap_src=120, cap_data=120, emax_src=3e11, max_tgt=300,
-          threads=1, log=False, refill=(), refill_hint=None):
+          threads=1, log=False, refill=(), refill_hint=None, max_mtgt=200, vol=False):
     M, D = st.M, st.D
     cap = st.inst["energyCap"]
     for m, t, fo in refill:  # kept models whose bins were emptied are still trained
@@ -41,7 +41,7 @@ def solve(st, multi_cands=(), extra_mono=(), hint=None, tlim=60, cap_src=120, ca
     nsrc = collections.defaultdict(list); ntgt = collections.defaultdict(list)
     energy = []
     LAM, MU = 2.8e-10, 0.0052
-    for t in TYPES:
+    for t in ([] if vol else TYPES):
         pv = sum(D[i]["size"] for i in pool[t])
         pf = sum(D[i]["size"] for i in pool[t] if not D[i]["isCopyrighted"])
         monos = [i for i in unused if len(M[i]["dataRequirements"]) == 1 and t in M[i]["dataRequirements"]]
@@ -77,8 +77,17 @@ def solve(st, multi_cands=(), extra_mono=(), hint=None, tlim=60, cap_src=120, ca
                 for i in pool[t]:
                     if D[i]["size"] <= ub and (mode != "full" or not D[i]["isCopyrighted"]):
                         xv[key][i] = var(0)
+    # multi-type targets fully covered by new sources (value v//2)
+    mt = [] if vol else [i for i in unused if len(M[i]["dataRequirements"]) > 1 and M[i]["value"] // 2 > 0 and M[i]["energyCost"] <= ES]
+    mt.sort(key=lambda i: -(M[i]["value"] // 2) / (LAM * M[i]["energyCost"] + 125 * len(M[i]["dataRequirements"])))
+    mt = list(dict.fromkeys(mt[:max_mtgt] + [i for i in mt if i in forced or str(i) in hint or i in hint]))
+    for m in mt:
+        c = var(M[m]["value"] // 2); zt[m] = c; roles[m].append(c)
+        energy.append((c, M[m]["energyCost"]))
+        for t in M[m]["dataRequirements"]:
+            ntgt[t].append(c)
     # multi-type candidates
-    for m in dict.fromkeys(int(k) for k in multi_cands):
+    for m in ([] if vol else dict.fromkeys(int(k) for k in multi_cands)):
         if m in st.used:
             continue
         r = M[m]["dataRequirements"]
@@ -102,7 +111,10 @@ def solve(st, multi_cands=(), extra_mono=(), hint=None, tlim=60, cap_src=120, ca
         q = M[m]["dataRequirements"][t]
         for i in pool[t]:
             if D[i]["size"] <= q["upperBound"] and (not fo or not D[i]["isCopyrighted"]):
-                xv[key][i] = var(0)
+                if fo is False and not D[i]["isCopyrighted"] and vol:
+                    xv[key][i] = var(-D[i]["size"] * 1.001)  # prefer keeping free datasets in the pool
+                else:
+                    xv[key][i] = var(-D[i]["size"] if vol else 0)
     # bin constraints
     byi = collections.defaultdict(list)
     for key in rkeys:
@@ -202,9 +214,10 @@ def solve(st, multi_cands=(), extra_mono=(), hint=None, tlim=60, cap_src=120, ca
                 new_src[t].append(m); done.add(m)
     for m, c in zt.items():
         if sol[c] > 0.5:
-            t = next(iter(M[m]["dataRequirements"]))
-            s = new_src[t].pop()
-            st.src[s] = m; st.tgt[m].append(s); st.used.add(m)
+            for t in M[m]["dataRequirements"]:
+                s = new_src[t].pop()
+                st.src[s] = m; st.tgt[m].append(s)
+            st.used.add(m)
     for t, lst in new_src.items():
         for s in lst:
             for i in list(st.bin_items[(s, t)]):
@@ -221,6 +234,7 @@ if __name__ == "__main__":
     hint = {int(k): (v[0], v[1]) for k, v in p.get("hint", {}).items()}
     g, b = solve(st, p.get("multi_cands", []), p.get("extra_mono", []), hint, p.get("tlim", 60),
                  p.get("cap_src", 120), p.get("cap_data", 120), p.get("emax_src", 3e11), p.get("max_tgt", 300),
-                 p.get("threads", 1), refill=[tuple(r) for r in p.get("refill", [])], refill_hint=p.get("refill_hint"))
+                 p.get("threads", 1), refill=[tuple(r) for r in p.get("refill", [])], refill_hint=p.get("refill_hint"),
+                 vol=p.get("vol", False))
     print("gain", g, "bound", b, flush=True)
     json.dump(st.to_sol(), open(sys.argv[4], "w"))
