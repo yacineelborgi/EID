@@ -123,7 +123,31 @@ def run(path, tl=120, alpha=0.995, extra=0.0, lp=False, alpha_free=None, seeds=(
     return best, plan
 
 
+def strict_ok(inst, sol):
+    """Rules the official checker does not enforce: ids in range, each model used once
+    (as trained model or as source), a source's type is a requirement of its target."""
+    nM, nD = len(inst["models"]), len(inst["datasets"])
+    if not all(0 <= d < nD and 0 <= m < nM for d, m in sol["dataMappings"]):
+        return False
+    if not all(0 <= s < nM and 0 <= t < nM for s, t in sol["modelMappings"]):
+        return False
+    srcs = [s for s, _ in sol["modelMappings"]]
+    tgts = {t for _, t in sol["modelMappings"]}
+    if len(set(srcs)) != len(srcs) or tgts & set(srcs):
+        return False
+    for s, t in sol["modelMappings"]:
+        st = next(iter(inst["models"][s]["dataRequirements"]))
+        if st not in inst["models"][t]["dataRequirements"]:
+            return False
+    return True
+
+
 def save_if_better(path, sc, sol):
+    with open(path) as f:
+        inst = json.load(f)
+    if not strict_ok(inst, sol):
+        print("  REFUSED: solution breaks the rules (out-of-range id / model reused)")
+        return
     os.makedirs("solutions", exist_ok=True)
     out = os.path.join("solutions", os.path.basename(path).replace(".json", "_submission.json"))
     old = -1
