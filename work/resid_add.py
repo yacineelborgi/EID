@@ -1,0 +1,130 @@
+"""Use the pool (unused datasets) and the spare energy to add models, exactly (CP-SAT).
+Candidates per type t (all currently unused models):
+  - mono models as new sources (filled from pool items)
+  - mono models as half targets covered by a new source (value v//2, no data)
+  - mono models trained in full mode from free pool items (value v)
+  - mono models trained in half mode from any pool items (value v//2)
+Optionally a set of currently used models can be removed (freed energy + items)."""
+import json, sys, collections, bisect
+from ortools.sat.python import cp_model
+sys.path.insert(0, '.')
+from sol6 import State, TYPES
+
+
+def add_models(st, tlim=60, emax_src=3e11, max_tgt=300, max_full=300, workers=4, log=True):
+    M, D = st.M, st.D
+    cap = st.inst["energyCap"]
+    E_used = 0
+    for m in st.used:
+        E_used += M[m]["energyCost"]
+    ES = cap - E_used
+    pool = {t: [d["id"] for d in D if d["dataType"] == t and d["id"] not in st.item_bin] for t in TYPES}
+    unused = [i for i in range(len(M)) if i not in st.used]
+    mdl = cp_model.CpModel()
+    obj = []
+    energy = []
+    x = collections.defaultdict(dict)  # bin key -> item -> var
+    ybin = {}
+    zt = {}
+    nsrc = collections.defaultdict(list)
+    ntgt = collections.defaultdict(list)
+    roles = collections.defaultdict(list)  # model -> list of role vars
+    for t in TYPES:
+        pv = sum(D[i]["size"] for i in pool[t])
+        pf = sum(D[i]["size"] for i in pool[t] if not D[i]["isCopyrighted"])
+        monos = [i for i in unused if len(M[i]["dataRequirements"]) == 1 and t in M[i]["dataRequirements"]]
+        # targets: best value per energy
+        tg = sorted(monos, key=lambda i: -(M[i]["value"] // 2) / (M[i]["energyCost"] + 1))[:max_tgt]
+        for m in tg:
+            if M[m]["value"] // 2 <= 0 or M[m]["energyCost"] > ES:
+                continue
+            v = mdl.NewBoolVar(""); zt[m] = v; roles[m].append(v)
+            ntgt[t].append(v); obj.append((M[m]["value"] // 2) * v); energy.append(M[m]["energyCost"] * v)
+        for m in monos:
+            r = M[m]["dataRequirements"][t]
+            lb, ub = r["lowerBound"], r["upperBound"]
+            if ub < lb or lb > pv or M[m]["energyCost"] > ES:
+                continue
+            modes = []
+            if M[m]["energyCost"] <= emax_src:
+                modes.append("src")
+            if lb <= pf:
+                modes.append("full")
+            modes.append("half")
+            for mode in modes:
+                key = (m, t, mode)
+                y = mdl.NewBoolVar(""); ybin[key] = y; roles[m].append(y)
+                for i in pool[t]:
+                    if D[i]["size"] <= ub and (mode != "full" or not D[i]["isCopyrighted"]):
+                        x[key][i] = mdl.NewBoolVar("")
+                e = sum(D[i]["size"] * v for i, v in x[key].items())
+                mdl.Add(e >= lb).OnlyEnforceIf(y)
+                mdl.Add(e <= ub * y)
+                energy.append(M[m]["energyCost"] * y)
+                if mode == "src":
+                    nsrc[t].append(y)
+                elif mode == "full":
+                    obj.append(M[m]["value"] * y)
+                else:
+                    obj.append((M[m]["value"] // 2) * y)
+    for m, vs in roles.items():
+        if len(vs) > 1:
+            mdl.AddAtMostOne(vs)
+    byi = collections.defaultdict(list)
+    for key, d in x.items():
+        for i, v in d.items():
+            byi[i].append(v)
+    for i, vs in byi.items():
+        mdl.AddAtMostOne(vs)
+    for t in TYPES:
+        mdl.Add(sum(ntgt[t]) <= sum(nsrc[t]))
+    mdl.Add(sum(energy) <= ES)
+    mdl.Maximize(sum(obj))
+    sv = cp_model.CpSolver()
+    sv.parameters.max_time_in_seconds = tlim
+    sv.parameters.num_workers = workers
+    r = sv.Solve(mdl)
+    if r not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        if log:
+            print("resid: no solution", sv.StatusName(r))
+        return 0
+    gain = int(sv.ObjectiveValue())
+    if log:
+        print("resid gain", gain, sv.StatusName(r), "bound", sv.BestObjectiveBound(), "ES", ES, flush=True)
+    if gain <= 0:
+        return 0
+    # apply
+    new_src = collections.defaultdict(list)
+    for key, y in ybin.items():
+        if sv.Value(y):
+            m, t, mode = key
+            for i, v in x[key].items():
+                if sv.Value(v):
+                    st.item_bin[i] = (m, t); st.bin_items[(m, t)].add(i)
+            st.used.add(m)
+            if mode == "src":
+                new_src[t].append(m)
+    for m, v in zt.items():
+        if sv.Value(v):
+            t = next(iter(M[m]["dataRequirements"]))
+            s = new_src[t].pop()
+            st.src[s] = m; st.tgt[m].append(s); st.used.add(m)
+    # unused new sources (if any) -> remove their data
+    for t, lst in new_src.items():
+        for s in lst:
+            for i in list(st.bin_items[(s, t)]):
+                del st.item_bin[i]
+            st.bin_items[(s, t)] = set()
+            st.used.discard(s)
+    return gain
+
+
+if __name__ == "__main__":
+    inst = json.load(open(sys.argv[1]))
+    sol = json.load(open(sys.argv[2]))
+    st = State(inst, sol)
+    g = add_models(st, tlim=float(sys.argv[3]))
+    sc = st.score()
+    print(sc)
+    if sc[1]:
+        json.dump(st.to_sol(), open(sys.argv[4], "w"))

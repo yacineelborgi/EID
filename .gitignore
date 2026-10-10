@@ -2,3 +2,6 @@ __pycache__/
 logs/
 plans/
 .claude/worktrees/
+work/*.npy
+work/sa_pack
+work/test_solution.py
