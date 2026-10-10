@@ -41,49 +41,43 @@ def move(st, i, b):
 
 
 def step_singles(st, t, bins, freeonly):
-    """re-match bins with lb<=10000 of the given pool kind (freeonly True/False)."""
+    """re-match bins with lb<=10000 of the given pool kind (freeonly True/False).
+    Options: single items (pool + items of these bins held alone) and current multi-item
+    contents of these bins as atomic bundles, so the current assignment is always feasible."""
     D = st.D
     sel = [k for k, (lb, ub, fo) in bins.items() if fo == freeonly and lb <= 10000]
-    items = set(pool_items(st, t))
-    for k in sel:
-        items |= st.bin_items[k]
-    items = [i for i in items if (not freeonly) or not D[i]["isCopyrighted"]]
-    if not sel or not items:
+    if not sel:
         return 0
-    sizes = np.array([D[i]["size"] for i in items])
+    opts = []  # (size, [items])
+    for i in pool_items(st, t):
+        if (not freeonly) or not D[i]["isCopyrighted"]:
+            opts.append((D[i]["size"], [i]))
+    for k in sel:
+        its = list(st.bin_items[k])
+        if len(its) == 1:
+            opts.append((D[its[0]]["size"], its))
+        elif its:
+            opts.append((sum(D[i]["size"] for i in its), its))
+    sizes = np.array([o[0] for o in opts])
     BIG = 10 ** 9
-    C = np.full((len(sel), len(items)), BIG, dtype=np.int64)
+    C = np.full((len(sel), len(opts)), BIG, dtype=np.int64)
     for r, k in enumerate(sel):
         lb, ub, fo = bins[k]
         ok = (sizes >= lb) & (sizes <= ub)
         C[r, ok] = sizes[ok] - lb
     rows, cols = linear_sum_assignment(C)
+    if any(C[r, c] >= BIG for r, c in zip(rows, cols)):
+        return 0
     before = sum(D[i]["size"] for k in sel for i in st.bin_items[k])
-    newc = {}
-    for r, c in zip(rows, cols):
-        if C[r, c] < BIG:
-            newc[sel[r]] = [items[c]]
-    left = set(items) - set(x[0] for x in newc.values())
-    for k in sel:
-        if k in newc:
-            continue
-        lb, ub, fo = bins[k]
-        cands = sorted(((D[i]["size"], i) for i in left if D[i]["size"] <= ub), reverse=True)[:80]
-        res = min_subset(cands, lb, ub)
-        if res is None:
-            return 0
-        newc[k] = res
-        left -= set(res)
-    newvol = sum(D[i]["size"] for k in sel for i in newc[k])
-    if newvol >= before:
+    after = sum(int(sizes[c]) for c in cols)
+    if after >= before:
         return 0
     for k in sel:
         for i in list(st.bin_items[k]):
             move(st, i, None)
-    for k, its in newc.items():
-        for i in its:
-            move(st, i, k)
-    after = sum(D[i]["size"] for k in sel for i in st.bin_items[k])
+    for r, c in zip(rows, cols):
+        for i in opts[c][1]:
+            move(st, i, sel[r])
     return before - after
 
 
@@ -202,7 +196,7 @@ def step_pairs(st, t, bins, rng, npairs=200, max_pool=40, tlim=0.5, group=3):
     return gained
 
 
-def compact(st, t, rounds=3, seed=0, log=True, pairs=0, free_only=False):
+def compact(st, t, rounds=3, seed=0, log=True, pairs=0, free_only=False, group=3, gtlim=0.5):
     rng = random.Random(seed)
     bins = type_bins(st, t)
     D = st.D
@@ -211,7 +205,7 @@ def compact(st, t, rounds=3, seed=0, log=True, pairs=0, free_only=False):
         g2 = 0 if free_only else step_singles(st, t, bins, False)
         sub = {k: v for k, v in bins.items() if v[2]} if free_only else bins
         g3 = step_bins(st, t, sub, rng)
-        g4 = step_pairs(st, t, sub, rng, npairs=pairs) if pairs else 0
+        g4 = step_pairs(st, t, sub, rng, npairs=pairs, group=group, tlim=gtlim) if pairs else 0
         pv = sum(D[i]["size"] for i in pool_items(st, t))
         if log:
             print(f"  {t} round {r}: singlesF {g1} singlesA {g2} bins {g3} groups {g4} pool {pv}", flush=True)
@@ -224,6 +218,7 @@ if __name__ == "__main__":
     st = State(inst, sol)
     for t in sys.argv[3]:
         compact(st, t, rounds=int(sys.argv[4]), pairs=int(sys.argv[5]), seed=int(sys.argv[6]),
-                free_only=len(sys.argv) > 8 and sys.argv[8] == "free")
+                free_only=len(sys.argv) > 8 and sys.argv[8] == "free",
+                group=int(sys.argv[9]) if len(sys.argv) > 9 else 3, gtlim=float(sys.argv[10]) if len(sys.argv) > 10 else 0.5)
     print(st.score())
     json.dump(st.to_sol(), open(sys.argv[7], "w"))
