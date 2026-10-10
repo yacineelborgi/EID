@@ -14,6 +14,12 @@ from solve import strict_ok
 
 
 LP_MULTI = [9201, 13322, 8556, 935, 2930, 8223]
+try:
+    import numpy as _np
+    _lp = json.load(open("lp6_pos.json"))
+    LP_POS_MULTI, LP_POS_MONO = _lp["multi"], _lp["mono"]
+except (OSError, ValueError):
+    LP_POS_MULTI, LP_POS_MONO = [], []
 
 
 def clone(st):
@@ -44,11 +50,15 @@ def drop(st, m):
     st.tgt.pop(m, None)
 
 
-def ruin(st, rng, types, k_pair, k_mono, k_multi):
+def ruin(st, rng, types, k_pair, k_mono, k_multi, mode="mixed"):
     M = st.M
     mono_t = lambda m: next(iter(M[m]["dataRequirements"])) if len(M[m]["dataRequirements"]) == 1 else None
     victims = []
-    if rng.random() < 0.5:
+    if mode == "full":
+        fulls = [m for m in st.used if m not in st.src and not st.tgt.get(m) and any(t in M[m]["dataRequirements"] for t in types)]
+        victims += rng.sample(fulls, min(len(fulls), rng.randint(3, 10)))
+        k_pair = k_mono = k_multi = 0
+    elif rng.random() < 0.5:
         # targets whose sources burn the most energy, and the lowest value-per-energy targets
         tg_cost = collections.defaultdict(float)
         for s, tg in st.src.items():
@@ -107,11 +117,17 @@ def main():
             pass
         st = clone(best)
         types = rng.sample(TYPES, rng.choice([1, 1, 2]))
-        touched, dropped = ruin(st, rng, types, k_pair=rng.randint(1, 4), k_mono=rng.randint(0, 3), k_multi=rng.randint(0, 2))
-        for t in touched:
-            compact.compact(st, t, rounds=2, seed=rng.randrange(10 ** 6), log=False, pairs=60)
-        mc = [m for m in dropped if len(st.M[m]["dataRequirements"]) > 1] + LP_MULTI + rng.sample(multi_pool, 30)
-        resid_add.add_models(st, tlim=60, log=False, multi_cands=mc, workers=2)
+        mode = "full" if rng.random() < 0.5 else "mixed"
+        touched, dropped = ruin(st, rng, types, k_pair=rng.randint(1, 4), k_mono=rng.randint(0, 3), k_multi=rng.randint(0, 2), mode=mode)
+        if mode == "mixed":
+            for t in touched:
+                compact.compact(st, t, rounds=2, seed=rng.randrange(10 ** 6), log=False, pairs=60)
+        mc = [m for m in dropped if len(st.M[m]["dataRequirements"]) > 1] + LP_MULTI + LP_POS_MULTI + rng.sample(multi_pool, 30)
+        em = [m for m in dropped if len(st.M[m]["dataRequirements"]) == 1] + LP_POS_MONO
+        resid_add.add_models(st, tlim=60, log=False, multi_cands=mc, extra_mono=em, workers=2)
+        if mode == "full":
+            for t in touched:
+                compact.compact(st, t, rounds=1, seed=rng.randrange(10 ** 6), log=False, pairs=30)
         sc, ok, msg = st.score()
         if ok:
             fd, tin = tempfile.mkstemp(suffix=".json", dir=tmpdir); os.close(fd)

@@ -11,7 +11,7 @@ sys.path.insert(0, '.')
 from sol6 import State, TYPES
 
 
-def add_models(st, tlim=60, emax_src=3e11, max_tgt=300, max_full=300, workers=4, log=True, multi_cands=()):
+def add_models(st, tlim=60, emax_src=3e11, max_tgt=300, max_full=300, workers=4, log=True, multi_cands=(), extra_mono=()):
     M, D = st.M, st.D
     cap = st.inst["energyCap"]
     E_used = 0
@@ -33,8 +33,10 @@ def add_models(st, tlim=60, emax_src=3e11, max_tgt=300, max_full=300, workers=4,
         pv = sum(D[i]["size"] for i in pool[t])
         pf = sum(D[i]["size"] for i in pool[t] if not D[i]["isCopyrighted"])
         monos = [i for i in unused if len(M[i]["dataRequirements"]) == 1 and t in M[i]["dataRequirements"]]
-        # targets: best value per energy
+        # targets: best value per energy (+ forced extra candidates)
         tg = sorted(monos, key=lambda i: -(M[i]["value"] // 2) / (M[i]["energyCost"] + 1))[:max_tgt]
+        extra_t = [i for i in extra_mono if i in set(monos)]
+        tg = list(dict.fromkeys(tg + extra_t))
         for m in tg:
             if M[m]["value"] // 2 <= 0 or M[m]["energyCost"] > ES:
                 continue
