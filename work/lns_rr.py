@@ -79,12 +79,19 @@ def ruin(st, rng, types, k_pair, k_mono, k_multi, mode="mixed"):
         victims += rng.sample(cand, min(k_multi, len(cand)))
     touched = set(types)
     dropped = set()
+    hint = {}
     for m in set(victims):
         if m in st.used:
             touched |= set(M[m]["dataRequirements"])
             before = set(st.used)
+            snap = {}
+            for mm in [m] + list(st.tgt.get(m, [])):
+                kind = "src" if mm in st.src else ("tgt" if st.tgt.get(mm) else ("full" if st.is_full(mm) else "half"))
+                snap[mm] = (kind, {t: list(st.bin_items.get((mm, t), ())) for t in M[mm]["dataRequirements"]})
             drop(st, m)
             dropped |= before - st.used
+            hint.update({k: v for k, v in snap.items() if k not in st.used})
+    st._hint = hint
     return touched, dropped
 
 
@@ -124,7 +131,7 @@ def main():
                 compact.compact(st, t, rounds=2, seed=rng.randrange(10 ** 6), log=False, pairs=60)
         mc = [m for m in dropped if len(st.M[m]["dataRequirements"]) > 1] + LP_MULTI + LP_POS_MULTI + rng.sample(multi_pool, 30)
         em = [m for m in dropped if len(st.M[m]["dataRequirements"]) == 1] + LP_POS_MONO
-        resid_add.add_models(st, tlim=60, log=False, multi_cands=mc, extra_mono=em, workers=2)
+        resid_add.add_models(st, tlim=60, log=False, multi_cands=mc, extra_mono=em, workers=2, hint=getattr(st, '_hint', None))
         if mode == "full":
             for t in touched:
                 compact.compact(st, t, rounds=1, seed=rng.randrange(10 ** 6), log=False, pairs=30)

@@ -11,7 +11,7 @@ sys.path.insert(0, '.')
 from sol6 import State, TYPES
 
 
-def add_models(st, tlim=60, emax_src=3e11, max_tgt=300, max_full=300, workers=4, log=True, multi_cands=(), extra_mono=()):
+def add_models(st, tlim=60, emax_src=3e11, max_tgt=300, max_full=300, workers=4, log=True, multi_cands=(), extra_mono=(), hint=None, cap_src=120, cap_data=120):
     M, D = st.M, st.D
     cap = st.inst["energyCap"]
     E_used = 0
@@ -42,17 +42,31 @@ def add_models(st, tlim=60, emax_src=3e11, max_tgt=300, max_full=300, workers=4,
                 continue
             v = mdl.NewBoolVar(""); zt[m] = v; roles[m].append(v)
             ntgt[t].append(v); obj.append((M[m]["value"] // 2) * v); energy.append(M[m]["energyCost"] * v)
+        okm = []
         for m in monos:
             r = M[m]["dataRequirements"][t]
             lb, ub = r["lowerBound"], r["upperBound"]
             if ub < lb or lb > pv or M[m]["energyCost"] > ES:
                 continue
+            okm.append(m)
+        forced = set(extra_mono) | set(hint or ())
+        LAM, MU = 2.8e-10, 0.0052
+        lbof = lambda m: M[m]["dataRequirements"][t]["lowerBound"]
+        top_src = set(sorted((m for m in okm if M[m]["energyCost"] <= emax_src),
+                             key=lambda m: LAM * M[m]["energyCost"] + MU * lbof(m))[:cap_src])
+        top_full = set(sorted((m for m in okm if lbof(m) <= pf),
+                              key=lambda m: -(M[m]["value"] - LAM * M[m]["energyCost"] - MU * lbof(m)))[:cap_data])
+        top_half = set(sorted(okm, key=lambda m: -(M[m]["value"] // 2 - LAM * M[m]["energyCost"] - MU * lbof(m)))[:cap_data // 2])
+        for m in okm:
+            r = M[m]["dataRequirements"][t]
+            lb, ub = r["lowerBound"], r["upperBound"]
             modes = []
-            if M[m]["energyCost"] <= emax_src:
+            if M[m]["energyCost"] <= emax_src and (m in top_src or m in forced):
                 modes.append("src")
-            if lb <= pf:
+            if lb <= pf and (m in top_full or m in forced):
                 modes.append("full")
-            modes.append("half")
+            if m in top_half or m in forced:
+                modes.append("half")
             for mode in modes:
                 key = (m, t, mode)
                 y = mdl.NewBoolVar(""); ybin[key] = y; roles[m].append(y)
@@ -71,7 +85,7 @@ def add_models(st, tlim=60, emax_src=3e11, max_tgt=300, max_full=300, workers=4,
                     obj.append((M[m]["value"] // 2) * y)
     # multi-type candidates: full (free pool items only) or half (any pool items), no sources
     multi_bins = {}
-    for m in multi_cands:
+    for m in dict.fromkeys(multi_cands):
         if m in st.used:
             continue
         r = M[m]["dataRequirements"]
@@ -111,6 +125,30 @@ def add_models(st, tlim=60, emax_src=3e11, max_tgt=300, max_full=300, workers=4,
         mdl.Add(sum(ntgt[t]) <= sum(nsrc[t]))
     mdl.Add(sum(energy) <= ES)
     mdl.Maximize(sum(obj))
+    if hint:
+        on = set()
+        for m, (kind, bins) in hint.items():
+            nreq = len(M[m]["dataRequirements"])
+            if kind == "tgt":
+                if m in zt:
+                    on.add(zt[m].Index())
+                continue
+            for t, its in bins.items():
+                if nreq == 1:
+                    key = (m, t, kind)
+                else:
+                    key = (m, t, "M" + kind)
+                if key in ybin:
+                    on.add(ybin[key].Index())
+                    for i in its:
+                        if i in x[key]:
+                            on.add(x[key][i].Index())
+        seen = set()
+        for v in list(zt.values()) + list(ybin.values()) + [xv for d in x.values() for xv in d.values()]:
+            if v.Index() in seen:
+                continue
+            seen.add(v.Index())
+            mdl.AddHint(v, 1 if v.Index() in on else 0)
     sv = cp_model.CpSolver()
     sv.parameters.max_time_in_seconds = tlim
     sv.parameters.num_workers = workers
