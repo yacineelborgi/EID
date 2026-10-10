@@ -13,7 +13,7 @@ sys.path.insert(0, '.')
 from sol6 import State, TYPES
 
 
-def solve_roles2(st, tlim=600, verbose=False, gap=0.0, threads=1, multi=False, split=True, pool_subsets=True, allow_drop=True):
+def solve_roles2(st, tlim=600, verbose=False, gap=0.0, threads=1, multi=False, split=True, pool_subsets=True, allow_drop=True, topk=0):
     sub_items = []
     M, D = st.M, st.D
     cap = st.inst["energyCap"]
@@ -108,12 +108,16 @@ def solve_roles2(st, tlim=600, verbose=False, gap=0.0, threads=1, multi=False, s
             continue
         lst = monos[t]
         hi = bisect.bisect_right(lst, (f, 10 ** 12, 10 ** 12))
-        for lb, ub, i in lst[:hi]:
-            if ub < f:
-                continue
-            a_src.append((j, i, nc)); cost.append(0.0); nc += 1
+        cands = [i for lb, ub, i in lst[:hi] if ub >= f]
+        if topk:
+            ks = set(sorted(cands, key=lambda i: M[i]["energyCost"])[:topk])
+            ko = set(sorted(cands, key=lambda i: -((M[i]["value"] if fr else M[i]["value"] // 2) - 2.8e-10 * M[i]["energyCost"]))[:topk])
+            ks.add(m0); ko.add(m0)
+        for i in cands:
+            if not topk or i in ks:
+                a_src.append((j, i, nc)); cost.append(0.0); nc += 1
             val = M[i]["value"] if fr else M[i]["value"] // 2
-            if val > 0:
+            if val > 0 and (not topk or i in ko):
                 a_own.append((j, i, nc)); cost.append(float(val)); nc += 1
     z_idx = {}
     for i in cand_models:
@@ -272,7 +276,7 @@ if __name__ == "__main__":
     st = State(inst, sol)
     t0 = time.time()
     res = solve_roles2(st, tlim=float(sys.argv[4]), threads=int(sys.argv[5]) if len(sys.argv) > 5 else 1,
-                       multi=len(sys.argv) > 6 and sys.argv[6] == "multi")
+                       multi=len(sys.argv) > 6 and sys.argv[6] == "multi", topk=int(sys.argv[7]) if len(sys.argv) > 7 else 0)
     print("vars", res["nvars"], "obj", res["obj"], "bound", res["bound"], "cur", res["cur"], "time", round(time.time() - t0), flush=True)
     apply_roles2(st, res)
     sc = st.score()
