@@ -46,3 +46,20 @@ Constat commun : un besoin avec `lowerBound` minuscule consomme quand même un d
 
 `solve.strict_ok` refuse toute solution avec un id hors bornes ou un modèle utilisé deux fois
 (le correcteur fourni ne le vérifie pas).
+
+## Résultats légitimes et plafonds (sans la faille des ids négatifs)
+
+| Fichier | Score | Plafond rigoureux | Statut |
+|---|---|---|---|
+| 1_example | 12 946 | 12 946 | optimal prouvé (énumération exhaustive) |
+| 2_medium | 272 320 | 272 337 | écart ≤ 17 |
+| 3_free | 523 758 | 523 758 | optimal prouvé (Lagrangien exact + énumération) |
+| 4_precise | 1 031 941 | 1 031 941 | optimal prouvé (`proof_precise/`) |
+| 5_energy | 3 786 093 | 3 786 149 | écart ≤ 56 |
+| 6_shortage | 668 811 | 669 934 | écart ≤ 1 123 |
+| 7_big | 5 822 560 | 5 822 563 | écart ≤ 3 |
+
+Les plafonds sont des bornes de dualité faible recalculées en fractions exactes sur une relaxation
+valide (coupes « petits besoins » multi-seuils : les k plus petits besoins consomment au moins les
+k plus petits datasets). `proofs/` contient des copies de référence des scripts de preuve ; certains
+importent des modules de travail qui ne sont pas dans le dépôt.
