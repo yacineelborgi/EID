@@ -6,3 +6,4 @@ work/*.npy
 work/sa_pack
 work/test_solution.py
 local/
+run6/
